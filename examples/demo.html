@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mallette demo</title>
+<!-- examples/demo.html: mallette in a page. Serve the repository (python3 -m http.server) and open
+     /examples/demo.html. The documents are MALLET's own sample (test/corpora/mallet-web-en.txt), or
+     any text pasted in, one document to a line. -->
+<style>
+  :root { --bg: #fbfaf6; --text: #1d2430; --dim: #5d6a78; --line: #d9d4c7; --accent: #8a5a14; --bar: #c8963e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #11151c; --text: #dde5ee; --dim: #8ea0b2; --line: #2b3440; --accent: #e3b062; --bar: #b58434; } }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 Georgia, serif; margin: 0; padding: 20px 24px; max-width: 1100px; }
+  h1 { font: 600 20px system-ui, sans-serif; margin: 0 0 2px; } .dim { color: var(--dim); font-size: 13px; }
+  textarea { width: 100%; height: 120px; font: 12px/1.4 ui-monospace, monospace; background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 6px; box-sizing: border-box; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; font: 13px system-ui, sans-serif; }
+  select, input, button { font: 13px system-ui, sans-serif; } button { padding: 4px 12px; cursor: pointer; }
+  progress { width: 220px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; } th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font: 600 12px system-ui, sans-serif; color: var(--dim); } td.n { font: 12px ui-monospace, monospace; color: var(--dim); white-space: nowrap; }
+  .share { display: inline-block; height: 8px; background: var(--bar); border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>mallette</h1>
+<p class="dim">MALLET’s topic model in the browser: the same model as <code>mallet train-topics --num-threads 1</code> for the same documents and seed. Trained here, in a Web Worker.</p>
+<textarea id="docs" spellcheck="false" placeholder="One document to a line: a name, a label, then the text (MALLET's form)"></textarea>
+<div class="bar">
+  <label>topics <select id="k"><option>3</option><option selected>5</option><option>8</option><option>10</option></select></label>
+  <label>seed <input id="seed" type="number" value="7" style="width:5em"></label>
+  <label>iterations <select id="it"><option>200</option><option selected>400</option><option>1000</option></select></label>
+  <label><input id="opt" type="checkbox" checked> optimise every 20</label>
+  <button id="run">Train</button> <progress id="prog" max="1" value="0"></progress> <span id="msg" class="dim"></span>
+</div>
+<table id="out"></table>
+<script src="../src/mallette.js"></script>
+<script>
+(async function () {
+  var ta = document.getElementById('docs'), out = document.getElementById('out'), msg = document.getElementById('msg'), prog = document.getElementById('prog');
+  ta.value = await (await fetch('../test/corpora/mallet-web-en.txt')).text();
+  var job = null;
+  document.getElementById('run').onclick = function () {
+    if (job) { job.cancel(); job = null; this.textContent = 'Train'; msg.textContent = 'Stopped.'; return; }
+    var btn = this, LINE = /^(\S*)[\s,]*(\S*)[\s,]*(.*)$/;
+    var docs = ta.value.split('\n').filter(Boolean).map(function (l) { var m = LINE.exec(l); return { name: m[1], text: m[3] }; });
+    var o = { seed: +document.getElementById('seed').value, iterations: +document.getElementById('it').value, optimizeInterval: document.getElementById('opt').checked ? 20 : 0, diagnostics: true,
+      progress: function (i, of) { prog.max = of; prog.value = i; msg.textContent = 'iteration ' + i + ' of ' + of; } };
+    var t0 = performance.now(); btn.textContent = 'Stop'; out.innerHTML = '';
+    job = mallette.trainInWorker(docs, +document.getElementById('k').value, o);
+    job.promise.then(function (r) {
+      job = null; btn.textContent = 'Train';
+      msg.textContent = docs.length + ' documents, ' + r.result.docs.reduce(function (a, d) { return a + d.length; }, 0) + ' tokens, ' + Math.round(performance.now() - t0) + ' ms';
+      var tot = r.result.topics.reduce(function (a, t) { return a + t.tokens; }, 0);
+      out.innerHTML = '<tr><th>Topic</th><th>Share</th><th>Alpha</th><th>Coherence</th><th>Exclusivity</th><th>Words</th></tr>' + r.result.topics.map(function (t, k) {
+        var d = r.diagnostics.topics[k].scores, s = t.tokens / tot;
+        return '<tr><td class="n">' + k + '</td><td class="n"><span class="share" style="width:' + Math.round(80 * s) + 'px"></span>' + (100 * s).toFixed(0) + '%</td><td class="n">' + t.alpha.toFixed(3) + '</td><td class="n">' + d.coherence.toFixed(1) + '</td><td class="n">' + d.exclusivity.toFixed(3) + '</td><td>' + t.words.slice(0, 15).map(function (w) { return w[0]; }).join(' ') + '</td></tr>';
+      }).join('');
+      window.__done = true;
+    }, function (e) { job = null; btn.textContent = 'Train'; msg.textContent = e.message; });
+  };
+})();
+</script>
+</body>
+</html>

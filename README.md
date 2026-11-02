@@ -9,6 +9,20 @@ MALLET's topic model, LDA with hyperparameter optimisation, translated into Java
 
 It was written for [bench-kit](https://github.com/critical-code-studies/bench-kit), the shared modules of the critical code studies and digital humanities research benches (the [Melville](https://github.com/vector-humanities/melville) bench among them), where readers model the texts they are reading in the browser, beside the text, and a topic leads back to the passages it is drawn from.
 
+![The demo page: MALLET's sample of twelve documents trained in a Web Worker in 38 milliseconds, five topics with their share, alpha, coherence, exclusivity and words](docs/img/demo.png)
+
+*`examples/demo.html`: MALLET's own sample (12 documents, 1,245 tokens) trained in the page, in a Web Worker, with 5 topics, seed 7, 400 iterations and optimisation every 20. The topics are MALLET's for the same settings, word for word; coherence and exclusivity are from MALLET's diagnostics.*
+
+To try it, serve the repository and open the demo:
+
+```bash
+python3 -m http.server 8000
+```
+
+then `http://localhost:8000/examples/demo.html`. Paste any text, one document to a line, to model your own.
+
+**Contents:** [Why "mallette"](#why-mallette) · [Use](#use) · [In bench-kit](#in-bench-kit) · [Status](#status) · [Porting decisions](#porting-decisions) · [Plans](#plans) · [Testing](#testing) · [Credits](#credits)
+
 ## Why "mallette"
 
 A *mallette* is French for a small case, a briefcase or attaché case: something made to be carried. The name says what the project is, MALLET packed so it can go where Java cannot, into a reader's web page. The French diminutive *-ette* also makes it a little mallet, the same tool at a smaller size, without MALLET's classifiers, sequence taggers and command line. And it keeps MALLET's name in plain view, so that anyone who finds mallette finds MALLET, the work it rests on, as well.
@@ -19,15 +33,30 @@ Checked against MALLET 2.1.1 (`import-file --keep-sequence --remove-stopwords`, 
 
 | Corpus | Documents | Word types | Tokens | Topics | Iterations | Optimise every | Same topic assignments | Alpha, beta, topic keys | Diagnostics file | Inferred topics |
 |---|---|---|---|---|---|---|---|---|---|---|
-| MALLET's sample (web/en) | 12 | 893 | 1,245 | 3, 5, 8, 16, 20 | 50 to 1,000 | none, 10, 20 | all | identical | identical (0.2.0) | identical, the 12 documents (0.2.0) |
+| MALLET's sample (web/en) | 12 | 893 | 1,245 | 3, 5, 8, 16, 20 | 50 to 1,000 | none, 10, 20 | all | identical | identical (from 0.2.0) | identical, the 12 documents (from 0.2.0) |
 | Webster's 1913, in 40-line documents | 2,000 | 59,237 | 274,486 | 20 | 400 | 20 | all 274,486 | identical | | |
-| Webster's 1913: 1,500 documents trained, 500 others inferred | 1,500 | 48,357 | 202,276 | 20 | 400 | 20 | all 202,276 | identical | identical (0.2.0) | identical, the 500 new documents (0.2.0) |
+| Webster's 1913: 1,500 documents trained, 500 others inferred | 1,500 | 48,357 | 202,276 | 20 | 400 | 20 | all 202,276 | identical | identical (from 0.2.0) | identical, the 500 new documents (from 0.2.0) |
+
+0.2.1, with Java's logarithm, was checked again on MALLET's sample at 5 and 20 topics and on the third row, and every comparison was the same. The same model, to the last bit of alpha and beta, comes out of node 22 and Chrome 152.
 
 MALLET's command line takes only a positive `--random-seed`: a negative one is read as a missing argument, and nothing is written.
 
 On the larger corpus, MALLET took 7.6 seconds (with Java's start-up and the import) and mallette 14.0 seconds in node.
 
 ## Use
+
+| Call | What it does | MALLET |
+|---|---|---|
+| `mallette.importDocs(docs, o)` | documents (text, or tokens made already) into a corpus | `import-file --keep-sequence --remove-stopwords` |
+| `new mallette.TopicModel(k, o)`, `addInstances`, `estimate()` / `estimateAsync()` | a model trained, straight through or in steps | `train-topics --num-threads 1` |
+| `mallette.train(docs, k, o)` | the two above in one call | |
+| `model.result(n)` | topics, words, document proportions, alpha, beta, log-likelihood, as values | |
+| `model.topicKeys(n)`, `docTopics()`, `state()` | MALLET's own files | `--output-topic-keys`, `--output-doc-topics`, `--output-state` |
+| `model.diagnostics(n)`, `diagnosticsXML(n)` | each topic's coherence, exclusivity and ten more measures | `--diagnostics-file` |
+| `model.inferencer(seed).infer(docs, o)`, `docTopics(r)` | the topics of new documents, the model unchanged | `infer-topics` |
+| `model.toJSON()`, `mallette.inferencerFrom(data, seed)` | a model as plain data, and an inferencer from it | `--inferencer-filename` |
+| `mallette.trainInWorker(docs, k, o)` | training in a Web Worker, with progress and cancel | |
+| `mallette.log(x)` | Java's `Math.log` (fdlibm) | |
 
 In a page:
 
@@ -76,6 +105,22 @@ job.promise.then(({ result, model, topicKeys, diagnostics }) => { /* model is to
 
 It loads `mallette-worker.js` from beside `mallette.js` (or `workerURL`). `numWords` sets how many words of each topic come back, and `diagnosticsWords` how many top words the diagnostics are taken over (20, as MALLET's `--num-top-words`), since coherence and exclusivity depend on it.
 
+## In bench-kit
+
+bench-kit carries mallette (a copy of a release, pinned) for its Topics tab. Each bench makes its own models from its own documents with bench-kit's `tools/topics.js`, which trains every setting and seed asked for with mallette in node and checks how far each setting's topics recur across seeds; readers run models of their own in the tab, and the same settings give the same model in the browser as in node. The screenshots are of the [Melville bench](https://github.com/vector-humanities/melville) (Herman Melville's *Billy Budd*), with the model it publishes: the reading text in 80 documents of about 400 words, eight topics.
+
+![The Topics tab's topics: eight topics of Billy Budd, each with its share of the text, coherence, exclusivity and twenty words](docs/img/bench-topics.png)
+
+*Each topic's words, share, coherence and exclusivity (MALLET's diagnostics, computed by mallette).*
+
+![A topic through the text: the share of the topic of captain, Vere, Claggart, court in each document of Billy Budd, in reading order, rising from chapter 18 to its height at chapters 19 to 22](docs/img/bench-through.png)
+
+*A topic through the text: its share of each document in reading order, and the documents that carry most of it, each a link to the text.*
+
+![One topic across the stages of the manuscript: a table of chapters against the 34 stages of composition, shaded by the topic's share, with cells resting on little text marked](docs/img/bench-stages.png)
+
+*The manuscript's 34 stages of composition, each inferred on the model (mallette's inference), so every stage is read in the same topics: one topic, chapter by chapter and stage by stage. A cell resting on fewer than one document's worth of the model's words is marked ◌.*
+
 ## Porting decisions
 
 - **One thread.** MALLET's `ParallelTopicModel` divides the documents among threads and merges their counts after each iteration; with more than one thread its result depends on how the threads interleave. mallette follows the one-thread path (`WorkerCallable` as the only worker), which is the one that can be repeated exactly.
@@ -96,12 +141,13 @@ It loads `mallette-worker.js` from beside `mallette.js` (or `workerURL`). `numWo
 - **Iterated conditional modes** (`--num-icm-iterations`), the topic–document listing (`--output-topic-docs`), word–topic counts and topic–word weights.
 - **Speed**, without changing a single assignment.
 - **More in the test suite**: a larger public-domain corpus kept with its MALLET outputs, and the edge cases (empty documents, one-word documents).
-- **bench-kit's topics module**, which uses mallette: documents defined by each bench (leaves, chapters, stages), models saved and published so that "topic 7" means the same thing to every reader, and views that lead from a topic back to its passages.
 - **An npm package**, once the API has settled.
 
 ## Testing
 
 `npm test` (`node test/run.js`) needs no Java: it compares mallette's state, topic keys, document topics, diagnostics and inferred topics with MALLET's own files for its sample (`test/expected/`), byte for byte, and checks the rest (the model as data, inference leaving the model as it was, estimation in steps). `test/worker.html`, opened from a local server, checks `trainInWorker` against a run in the page.
+
+`examples/demo.html` is the page in the screenshot at the top.
 
 `test/compare.js` runs MALLET itself beside mallette, on any corpus and settings:
 
@@ -113,6 +159,8 @@ node test/compare.js train.txt --topics 20 --seed 7 --optimize 20 --infer new.tx
 It needs MALLET (by default at `~/Projects/tools/mallet/bin/mallet`, or `--mallet <path>`) and Java on the `PATH`. It reports whether the two agree on the alphabet, on every token's topic, on alpha, beta and the topic keys, on the diagnostics file and on the topics inferred (for the corpus itself, or for `--infer`), with the first difference if there is one, and exits with 1 if they do not agree.
 
 ## Credits
+
+Cite mallette as: Berry, D. M. (2026) *mallette: MALLET's topic model in JavaScript*. Version 0.2.1. Available at: https://github.com/Computational-Hermeneutics/mallette.
 
 MALLET is the work of Andrew McCallum and many others at the University of Massachusetts Amherst; its `ParallelTopicModel`, the sparse sampler mallette translates, and its hyperparameter optimisation (after Hanna Wallach's methods) are David Mimno's. Cite MALLET as: McCallum, Andrew Kachites. "MALLET: A Machine Learning for Language Toolkit." 2002. <https://mimno.github.io/Mallet/>.
 

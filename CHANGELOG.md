@@ -1,5 +1,10 @@
 # Changelog: mallette
 
+## Unreleased
+
+- `examples/demo.html`: mallette in a page, training MALLET's sample (or text pasted in) in a Web Worker, with each topic's share, alpha, coherence, exclusivity and words.
+- The README: the demo and the bench-kit Topics tab in screenshots (`docs/img/`), the calls at a glance beside their MALLET commands, how to try it, how to cite it.
+
 ## 0.2.1 (2 November 2026)
 
 - **Java's logarithm.** mallette carries fdlibm's `log`, which Java's `StrictMath.log` is and its `Math.log` gives (checked on 800 values with Java 27 on arm64), in place of JavaScript's `Math.log`. JavaScript's differs from it in the last bit for about one value in two thousand, and from one engine to another (node 22 and Chrome 152 differ), so a model trained in a browser and the same model trained in node could part on a long run, and either could part from MALLET. The tests made with 0.2.0 matched MALLET because none of them met such a value; with 0.2.1 the same model comes out of every engine, as MALLET's. `mallette.log` is the function.

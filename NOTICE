@@ -1,0 +1,16 @@
+mallette
+Copyright 2026 David M. Berry
+
+This product includes software translated from MALLET 2.1.1, the MAchine
+Learning for LanguagE Toolkit (https://github.com/mimno/Mallet):
+
+  This software is Copyright (C) 2002, 2003 University of Massachusetts
+  Amherst, Department of Computer Science, and is licensed under the
+  terms of the Apache License, Version 2.0 or (at your option)
+  any subsequent version.
+
+src/mallette.js translates parts of cc.mallet.topics.ParallelTopicModel,
+cc.mallet.topics.WorkerCallable, cc.mallet.types.Dirichlet,
+cc.mallet.util.Randoms, cc.mallet.classify.tui.Csv2Vectors and
+cc.mallet.pipe.TokenSequenceRemoveStopwords into JavaScript, with the
+changes listed at the head of that file and in README.md.

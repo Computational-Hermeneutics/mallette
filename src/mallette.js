@@ -4,13 +4,16 @@
  * A translation into JavaScript of parts of MALLET 2.1.1, the MAchine Learning for LanguagE Toolkit
  * (https://github.com/mimno/Mallet): Copyright (C) 2002, 2003 University of Massachusetts Amherst,
  * Department of Computer Science, licensed under the Apache License, Version 2.0. Translated from
- * cc.mallet.topics.ParallelTopicModel and WorkerCallable (one thread), cc.mallet.types.Dirichlet,
+ * cc.mallet.topics.ParallelTopicModel and WorkerCallable (one thread), TopicModelDiagnostics and
+ * TopicInferencer, cc.mallet.types.Dirichlet,
  * cc.mallet.util.Randoms (and java.util.Random beneath it), cc.mallet.classify.tui.Csv2Vectors
  * (its default tokens and lower-casing) and cc.mallet.pipe.TokenSequenceRemoveStopwords (its
  * built-in English list), and changed for JavaScript: one thread only; documents given as text
  * rather than read from files; asynchronous estimation in steps, with progress and a way to stop;
- * the outputs as values as well as MALLET's text formats. With the same documents and seed it means
- * to make the same assignments as `mallet train-topics --num-threads 1` (test/compare.js checks).
+ * the outputs as values as well as MALLET's text formats; a model as plain data; a Web Worker
+ * (mallette-worker.js). With the same documents and seed it means to make the same assignments as
+ * `mallet train-topics --num-threads 1`, the same diagnostics file, and the same topics for new
+ * documents as `infer-topics` (test/compare.js and test/run.js check).
  * mallette is licensed under the Apache License, Version 2.0 (LICENSE; NOTICE).
  */
 (function (root, factory) {
@@ -18,7 +21,7 @@
   else root.mallette = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  var M = {};
+  var M = { VERSION: '0.2.0' };
   // MALLET's built-in English stoplist, as TokenSequenceRemoveStopwords holds it (524 entries; its commented-out
   // words for paper abstracts left out, as Java leaves them)
   var STOPLIST_EN = ['a','able','about','above','according','accordingly','across','actually','after','afterwards','again','against','all','allow','allows','almost','alone','along','already','also','although','always','am','among','amongst','an','and','another','any','anybody','anyhow','anyone','anything','anyway','anyways','anywhere','apart','appear','appreciate','appropriate','are','around','as','aside','ask','asking','associated','at','available','away','awfully','b','be','became','because','become','becomes','becoming','been','before','beforehand','behind','being','believe','below','beside','besides','best','better','between','beyond','both','brief','but','by','c','came','can','cannot','cant','cause','causes','certain','certainly','changes','clearly','co','com','come','comes','concerning','consequently','consider','considering','contain','containing','contains','corresponding','could','course','currently','d','definitely','described','despite','did','different','do','does','doing','done','down','downwards','during','e','each','edu','eg','eight','either','else','elsewhere','enough','entirely','especially','et','etc','even','ever','every','everybody','everyone','everything','everywhere','ex','exactly','example','except','f','far','few','fifth','first','five','followed','following','follows','for','former','formerly','forth','four','from','further','furthermore','g','get','gets','getting','given','gives','go','goes','going','gone','got','gotten','greetings','h','had','happens','hardly','has','have','having','he','hello','help','hence','her','here','hereafter','hereby','herein','hereupon','hers','herself','hi','him','himself','his','hither','hopefully','how','howbeit','however','i','ie','if','ignored','immediate','in','inasmuch','inc','indeed','indicate','indicated','indicates','inner','insofar','instead','into','inward','is','it','its','itself','j','just','k','keep','keeps','kept','know','knows','known','l','last','lately','later','latter','latterly','least','less','lest','let','like','liked','likely','little','look','looking','looks','ltd','m','mainly','many','may','maybe','me','mean','meanwhile','merely','might','more','moreover','most','mostly','much','must','my','myself','n','name','namely','nd','near','nearly','necessary','need','needs','neither','never','nevertheless','new','next','nine','no','nobody','non','none','noone','nor','normally','not','nothing','novel','now','nowhere','o','obviously','of','off','often','oh','ok','okay','old','on','once','one','ones','only','onto','or','other','others','otherwise','ought','our','ours','ourselves','out','outside','over','overall','own','p','particular','particularly','per','perhaps','placed','please','plus','possible','presumably','probably','provides','q','que','quite','qv','r','rather','rd','re','really','reasonably','regarding','regardless','regards','relatively','respectively','right','s','said','same','saw','say','saying','says','second','secondly','see','seeing','seem','seemed','seeming','seems','seen','self','selves','sensible','sent','serious','seriously','seven','several','shall','she','should','since','six','so','some','somebody','somehow','someone','something','sometime','sometimes','somewhat','somewhere','soon','sorry','specified','specify','specifying','still','sub','such','sup','sure','t','take','taken','tell','tends','th','than','thank','thanks','thanx','that','thats','the','their','theirs','them','themselves','then','thence','there','thereafter','thereby','therefore','therein','theres','thereupon','these','they','think','third','this','thorough','thoroughly','those','though','three','through','throughout','thru','thus','to','together','too','took','toward','towards','tried','tries','truly','try','trying','twice','two','u','un','under','unfortunately','unless','unlikely','until','unto','up','upon','us','use','used','useful','uses','using','usually','uucp','v','value','various','very','via','viz','vs','w','want','wants','was','way','we','welcome','well','went','were','what','whatever','when','whence','whenever','where','whereafter','whereas','whereby','wherein','whereupon','wherever','whether','which','while','whither','who','whoever','whole','whom','whose','why','will','willing','wish','with','within','without','wonder','would','would','x','y','yes','yet','you','your','yours','yourself','yourselves','z','zero'];
@@ -60,8 +63,11 @@
   function Alphabet() { this.map = new Map(); this.words = []; }
   Alphabet.prototype.lookup = function (w) { var i = this.map.get(w); if (i === undefined) { i = this.words.length; this.map.set(w, i); this.words.push(w); } return i; };
   Alphabet.prototype.size = function () { return this.words.length; };
+  // the same alphabet, not grown: a word it does not hold is -1 (as MALLET gives a new word an index
+  // past the model's types, which inference passes over)
+  Alphabet.prototype.fixed = function () { var map = this.map; return { words: this.words, size: function () { return map.size; }, lookup: function (w) { var i = map.get(w); return i === undefined ? -1 : i; } }; };
   M.Alphabet = Alphabet;
-  // docs: [{ name, text }] or [text]; o.stopwords (a list; true for MALLET's, false for none: true by
+  // docs: [{ name, text }] or [text], or [{ name, tokens }] with tokens made already; o.stopwords (a list; true for MALLET's, false for none: true by
   // default), o.extraStopwords, o.preserveCase, o.token (a RegExp with the g and u flags)
   M.importDocs = function (docs, o) {
     o = o || {};
@@ -70,12 +76,14 @@
     list.concat(o.extraStopwords || []).forEach(function (w) { stop.add(String(w).toLowerCase()); });
     var re = o.token || M.TOKEN;
     return {
-      alphabet: alphabet,
+      alphabet: alphabet, options: { stopwords: o.stopwords, extraStopwords: o.extraStopwords, preserveCase: o.preserveCase, token: o.token },
       docs: docs.map(function (d, i) {
         var text = typeof d === 'string' ? d : d.text || '', name = typeof d === 'string' ? 'doc' + i : (d.name != null ? String(d.name) : 'doc' + i);
         if (!o.preserveCase) text = text.toLowerCase();
         var out = [];
-        (text.match(new RegExp(re.source, re.flags)) || []).forEach(function (t) { if (!stop.has(o.preserveCase ? t.toLowerCase() : t)) out.push(alphabet.lookup(t)); });
+        // a document's own tokens (d.tokens), where a bench has made them, in place of the token pattern
+        var toks = typeof d === 'object' && Array.isArray(d.tokens) ? d.tokens.map(function (t) { return o.preserveCase ? String(t) : String(t).toLowerCase(); }) : (text.match(new RegExp(re.source, re.flags)) || []);
+        toks.forEach(function (t) { if (!stop.has(o.preserveCase ? t.toLowerCase() : t)) out.push(alphabet.lookup(t)); });
         return { name: name, tokens: Int32Array.from(out), meta: typeof d === 'object' ? d.meta : undefined };
       })
     };
@@ -197,6 +205,7 @@
   // corpus: from importDocs
   TopicModel.prototype.addInstances = function (corpus) {
     this.alphabet = corpus.alphabet;
+    this.importOptions = corpus.options || {};
     this.numTypes = corpus.alphabet.size();
     this.betaSum = this.beta * this.numTypes;
     var random = new JavaRandom(this.seed), K = this.numTopics;
@@ -555,6 +564,342 @@
       out.push(s);
     });
     return out.join('');
+  };
+
+
+  // ---------- java.util.Formatter's %.nf (Locale.US) ----------
+  // Java formats the double's shortest decimal digits, rounded half up at the place asked for
+  function javaFixed(x, d) {
+    if (x !== x) return 'NaN';
+    if (x === Infinity) return 'Infinity';
+    if (x === -Infinity) return '-Infinity';
+    var neg = x < 0 || (x === 0 && 1 / x < 0), m = /^(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(Math.abs(x).toExponential());
+    var digs = m[1] + (m[2] || ''), shift = +m[3] - (digs.length - 1) + d, n;
+    if (shift >= 0) n = BigInt(digs) * (BigInt(10) ** BigInt(shift));
+    else {
+      var cut = digs.length + shift;
+      if (cut < 0) n = BigInt(0);
+      else { n = BigInt(digs.slice(0, cut) || '0'); if (digs.charAt(cut) >= '5') n += BigInt(1); }
+    }
+    var t = n.toString();
+    while (t.length < d + 1) t = '0' + t;
+    return (neg ? '-' : '') + (d ? t.slice(0, t.length - d) + '.' + t.slice(t.length - d) : t);
+  }
+  M.javaFixed = javaFixed;
+
+  // ---------- cc.mallet.topics.TopicModelDiagnostics ----------
+  // MALLET's --diagnostics-file: for each topic, the measures below, and for each of its top words
+  // those that are defined word by word. numTopWords as --num-top-words (20).
+  var DOC_PROPORTIONS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5], TWO_PERCENT_INDEX = 1, FIFTY_PERCENT_INDEX = 6;
+  TopicModel.prototype.diagnostics = function (numTopWords) {
+    var N = numTopWords || 20, K = this.numTopics, self = this, words = this.alphabet.words, sw = this.sortedWords();
+    var tpt = this.tokensPerTopic, numTypes = this.numTypes, t, i, j;
+    var topWords = sw.map(function (l) { var a = []; for (var x = 0; x < N; x++) a.push(x < l.length ? words[l[x][0]] : null); return a; });
+    // collectDocumentStatistics
+    var co = [], rank1 = new Int32Array(K), nonZero = new Int32Array(K), atProps = [], sumCLC = new Float64Array(K);
+    var wordTypeCounts = new Int32Array(numTypes), numTokens = 0, topIdx = [], inOrder = [], docSets = [];
+    for (t = 0; t < K; t++) {
+      co.push(new Int32Array(N * N)); atProps.push(new Int32Array(DOC_PROPORTIONS.length));
+      var set = new Set(), ord = new Int32Array(N);   // a missing word's index is Java's default, 0
+      for (i = 0; i < N; i++) if (topWords[t][i] != null) { var ty = this.alphabet.map.get(topWords[t][i]); ord[i] = ty; set.add(ty); }
+      topIdx.push(set); inOrder.push(ord); docSets.push(new Set());
+    }
+    var topicCounts = new Int32Array(K);
+    this.data.forEach(function (doc) {
+      var tokens = doc.tokens, topics = doc.topics, p;
+      for (p = 0; p < tokens.length; p++) {
+        var type = tokens[p], topic = topics[p];
+        numTokens++; wordTypeCounts[type]++; topicCounts[topic]++;
+        if (topIdx[topic].has(type)) docSets[topic].add(type);
+      }
+      var docLength = tokens.length;
+      if (docLength > 0) {
+        var maxTopic = -1, maxCount = -1;
+        for (var topic2 = 0; topic2 < K; topic2++) {
+          if (topicCounts[topic2] > 0) {
+            nonZero[topic2]++;
+            if (topicCounts[topic2] > maxCount) { maxTopic = topic2; maxCount = topicCounts[topic2]; }
+            sumCLC[topic2] += topicCounts[topic2] * Math.log(topicCounts[topic2]);
+            var proportion = (self.alpha[topic2] + topicCounts[topic2]) / (self.alphaSum + docLength);
+            for (var q = 0; q < DOC_PROPORTIONS.length; q++) { if (proportion < DOC_PROPORTIONS[q]) break; atProps[topic2][q]++; }
+            var supported = docSets[topic2], ix = inOrder[topic2], M2 = co[topic2];
+            for (var a = 0; a < N; a++) {
+              if (supported.has(ix[a])) {
+                for (var b = a; b < N; b++) {
+                  if (a === b) M2[a * N + a]++;
+                  else if (supported.has(ix[b])) { M2[a * N + b]++; M2[b * N + a]++; }
+                }
+              }
+            }
+            docSets[topic2].clear(); topicCounts[topic2] = 0;
+          }
+        }
+        if (maxTopic > -1) rank1[maxTopic]++;
+      }
+    });
+    // the measures, in MALLET's order; words: a score for each of the top words where it is defined
+    function S(name) { var w = []; for (var x = 0; x < K; x++) w.push(new Float64Array(N)); return { name: name, scores: new Float64Array(K), words: w, wordScores: false }; }
+    var list = [];
+    var tok = S('tokens'); for (t = 0; t < K; t++) tok.scores[t] = tpt[t]; list.push(tok);
+    var ent = S('document_entropy'); for (t = 0; t < K; t++) ent.scores[t] = -sumCLC[t] / tpt[t] + Math.log(tpt[t]); list.push(ent);
+    var wl = S('word-length'); wl.wordScores = true;
+    for (t = 0; t < K; t++) { var total = 0; for (i = 0; i < N; i++) { if (topWords[t][i] == null) break; total += topWords[t][i].length; wl.words[t][i] = topWords[t][i].length; } wl.scores[t] = total / N; }
+    list.push(wl);
+    var coh = S('coherence'); coh.wordScores = true;
+    for (t = 0; t < K; t++) {
+      var mx = co[t], ts = 0;
+      for (var row = 0; row < N; row++) {
+        var rs = 0, mn = 0;
+        for (var col = 0; col < row; col++) { var sc = Math.log((mx[row * N + col] + self.beta) / (mx[col * N + col] + self.beta)); rs += sc; if (sc < mn) mn = sc; }
+        ts += rs; coh.words[t][row] = mn;
+      }
+      coh.scores[t] = ts;
+    }
+    list.push(coh);
+    var uni = S('uniform_dist'); uni.wordScores = true;
+    for (t = 0; t < K; t++) { var u = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc2 = (c / tpt[t]) * Math.log((c * numTypes) / tpt[t]); if (pos < N) uni.words[t][pos] = sc2; u += sc2; }); uni.scores[t] = u; }
+    list.push(uni);
+    var cor = S('corpus_dist'); cor.wordScores = true;
+    for (t = 0; t < K; t++) { var coef = numTokens / tpt[t], cs = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc3 = (c / tpt[t]) * Math.log(coef * c / wordTypeCounts[x[0]]); if (pos < N) cor.words[t][pos] = sc3; cs += sc3; }); cor.scores[t] = cs; }
+    list.push(cor);
+    var eff = S('eff_num_words');
+    for (t = 0; t < K; t++) { var ss = 0; sw[t].forEach(function (x) { var pr = x[1] / tpt[t]; ss += pr * pr; }); eff.scores[t] = 1.0 / ss; }
+    list.push(eff);
+    var tdd = S('token-doc-diff'); tdd.wordScores = true;
+    for (t = 0; t < K; t++) {
+      var wd = new Float64Array(N), dd = new Float64Array(N), wsum = 0, dsum = 0, pos2 = 0, tsc = 0;
+      while (pos2 < sw[t].length && pos2 < N) { wd[pos2] = sw[t][pos2][1]; dd[pos2] = co[t][pos2 * N + pos2]; wsum += wd[pos2]; dsum += dd[pos2]; pos2++; }
+      for (pos2 = 0; pos2 < N; pos2++) {
+        var pp = wd[pos2] / wsum, qq = dd[pos2] / dsum, mean = 0.5 * (pp + qq), sc4 = 0.0;
+        if (pp > 0) sc4 += 0.5 * pp * Math.log(pp / mean);
+        if (qq > 0) sc4 += 0.5 * qq * Math.log(qq / mean);
+        tdd.words[t][pos2] = sc4; tsc += sc4;
+      }
+      tdd.scores[t] = tsc;
+    }
+    list.push(tdd);
+    var r1 = S('rank_1_docs'); for (t = 0; t < K; t++) r1.scores[t] = rank1[t] / nonZero[t]; list.push(r1);
+    var ar = S('allocation_ratio'); for (t = 0; t < K; t++) ar.scores[t] = atProps[t][FIFTY_PERCENT_INDEX] / atProps[t][TWO_PERCENT_INDEX]; list.push(ar);
+    var ac = S('allocation_count'); for (t = 0; t < K; t++) ac.scores[t] = atProps[t][5] / nonZero[t]; list.push(ac);
+    var ex = S('exclusivity'); ex.wordScores = true;
+    var sumDefault = 0.0; for (t = 0; t < K; t++) sumDefault += self.beta / (self.betaSum + tpt[t]);
+    for (t = 0; t < K; t++) {
+      var xs = 0, pos3 = 0;
+      for (j = 0; j < sw[t].length; j++) {
+        var type3 = sw[t][j][0], cnt = sw[t][j][1], sumType = sumDefault, tc = self.typeTopicCounts[type3], k3 = 0;
+        while (k3 < tc.length && tc[k3] > 0) { sumType += (tc[k3] >> self.topicBits) / (self.betaSum + tpt[tc[k3] & self.topicMask]); k3++; }
+        var sc5 = ((self.beta + cnt) / (self.betaSum + tpt[t])) / sumType;
+        ex.words[t][pos3] = sc5; xs += sc5; pos3++;
+        if (pos3 === N) break;
+      }
+      ex.scores[t] = xs / N;
+    }
+    list.push(ex);
+    return {
+      numTopWords: N, measures: list, numTokens: numTokens,
+      topics: sw.map(function (l, topic) {
+        var out = { topic: topic, scores: {}, words: [] }, cum = 0;
+        list.forEach(function (m) { out.scores[m.name] = m.scores[topic]; });
+        for (var r = 0; r < Math.min(N, l.length); r++) {
+          var prob = l[r][1] / tpt[topic], w = { rank: r + 1, word: words[l[r][0]], count: l[r][1], prob: prob, cumulative: (cum += prob), docs: co[topic][r * N + r], scores: {} };
+          list.forEach(function (m) { if (m.wordScores) w.scores[m.name] = m.words[topic][r]; });
+          out.words.push(w);
+        }
+        return out;
+      })
+    };
+  };
+  // the --diagnostics-file, as MALLET writes it (TopicTrainer prints toXML() with println)
+  TopicModel.prototype.diagnosticsXML = function (numTopWords) {
+    var D = this.diagnostics(numTopWords), out = ['<?xml version="1.0" encoding="UTF-8"?>\n<model>\n'];
+    D.topics.forEach(function (T) {
+      var s = "<topic id='" + T.topic + "'";
+      D.measures.forEach(function (m) { s += ' ' + m.name + "='" + javaFixed(T.scores[m.name], 4) + "'"; });
+      s += '>\n';
+      T.words.forEach(function (w) {
+        s += "<word rank='" + w.rank + "' count='" + javaFixed(w.count, 0) + "' prob='" + javaFixed(w.prob, 5) + "' cumulative='" + javaFixed(w.cumulative, 5) + "' docs='" + w.docs + "'";
+        D.measures.forEach(function (m) { if (m.wordScores) s += ' ' + m.name + "='" + javaFixed(w.scores[m.name], 4) + "'"; });
+        s += '>' + w.word.replace(/&/g, '&amp;').replace(/</g, '&gt;') + '</word>\n';   // MALLET's own escape, < as &gt;
+      });
+      out.push(s + '</topic>\n');
+    });
+    return out.join('') + '</model>\n\n';
+  };
+
+  // ---------- cc.mallet.topics.TopicInferencer ----------
+  // A trained model applied to new documents: their topic proportions, the model's word-topic
+  // counts held fixed (MALLET's infer-topics). The model's counts are copied, so the model can
+  // go on being used. seed as infer-topics' --random-seed (none: one drawn here).
+  function Inferencer(model, seed) {
+    var K = this.numTopics = model.numTopics;
+    this.topicMask = model.topicMask; this.topicBits = model.topicBits;
+    this.typeTopicCounts = model.typeTopicCounts.map(function (a) { return Int32Array.from(a); });
+    this.numTypes = this.typeTopicCounts.length;
+    this.tokensPerTopic = Int32Array.from(model.tokensPerTopic);
+    this.alpha = Float64Array.from(model.alpha); this.beta = model.beta; this.betaSum = model.betaSum;
+    this.alphabet = model.alphabet; this.importOptions = model.importOptions || {};
+    this.smoothingOnlyMass = 0.0; this.cachedCoefficients = new Float64Array(K);
+    for (var topic = 0; topic < K; topic++) {
+      this.smoothingOnlyMass += this.alpha[topic] * this.beta / (this.tokensPerTopic[topic] + this.betaSum);
+      this.cachedCoefficients[topic] = this.alpha[topic] / (this.tokensPerTopic[topic] + this.betaSum);
+    }
+    this.setRandomSeed(seed);
+  }
+  Inferencer.prototype.setRandomSeed = function (seed) { this.random = new JavaRandom(seed ? seed | 0 : (Math.random() * 2147483647) | 0); };
+  // getSampledDistribution: tokens (the model's type indices; -1 for a word it does not hold)
+  Inferencer.prototype.sampledDistribution = function (tokens, numIterations, thinning, burnIn) {
+    var K = this.numTopics, mask = this.topicMask, bits = this.topicBits, numTypes = this.numTypes, ttc = this.typeTopicCounts;
+    var alpha = this.alpha, beta = this.beta, betaSum = this.betaSum, tpt = this.tokensPerTopic, cc = this.cachedCoefficients, random = this.random;
+    var docLength = tokens.length, topics = new Int32Array(docLength), local = new Int32Array(K), localIndex = new Int32Array(K);
+    var type, position, topic, cur, denseIndex, i;
+    function known(t) { return t >= 0 && t < numTypes && ttc[t].length !== 0; }
+    for (position = 0; position < docLength; position++) {
+      type = tokens[position];
+      if (known(type)) { topics[position] = ttc[type][0] & mask; local[topics[position]]++; }
+    }
+    denseIndex = 0;
+    for (topic = 0; topic < K; topic++) if (local[topic] !== 0) { localIndex[denseIndex] = topic; denseIndex++; }
+    var nonZeroTopics = denseIndex, topicBetaMass = 0.0;
+    for (denseIndex = 0; denseIndex < nonZeroTopics; denseIndex++) {
+      topic = localIndex[denseIndex];
+      var n = local[topic];
+      topicBetaMass += beta * n / (tpt[topic] + betaSum);
+      cc[topic] = (alpha[topic] + n) / (tpt[topic] + betaSum);
+    }
+    var topicTermScores = new Float64Array(K), result = new Float64Array(K), sum = 0.0;
+    for (var iteration = 1; iteration <= numIterations; iteration++) {
+      for (position = 0; position < docLength; position++) {
+        type = tokens[position];
+        if (!known(type)) continue;
+        var oldTopic = topics[position];
+        cur = ttc[type];
+        topicBetaMass -= beta * local[oldTopic] / (tpt[oldTopic] + betaSum);
+        local[oldTopic]--;
+        if (local[oldTopic] === 0) {
+          denseIndex = 0;
+          while (localIndex[denseIndex] !== oldTopic) denseIndex++;
+          while (denseIndex < nonZeroTopics) { if (denseIndex < localIndex.length - 1) localIndex[denseIndex] = localIndex[denseIndex + 1]; denseIndex++; }
+          nonZeroTopics--;
+        }
+        topicBetaMass += beta * local[oldTopic] / (tpt[oldTopic] + betaSum);
+        cc[oldTopic] = (alpha[oldTopic] + local[oldTopic]) / (tpt[oldTopic] + betaSum);
+        var index = 0, topicTermMass = 0.0, score;
+        while (index < cur.length && cur[index] > 0) {
+          score = cc[cur[index] & mask] * (cur[index] >> bits);
+          topicTermMass += score; topicTermScores[index] = score; index++;
+        }
+        var sample = random.nextUniform() * (this.smoothingOnlyMass + topicBetaMass + topicTermMass), newTopic = -1;
+        if (sample < topicTermMass) {
+          i = -1;
+          while (sample > 0) { i++; sample -= topicTermScores[i]; }
+          newTopic = cur[i] & mask;
+        } else {
+          sample -= topicTermMass;
+          if (sample < topicBetaMass) {
+            sample /= beta;
+            for (denseIndex = 0; denseIndex < nonZeroTopics; denseIndex++) {
+              topic = localIndex[denseIndex];
+              sample -= local[topic] / (tpt[topic] + betaSum);
+              if (sample <= 0.0) { newTopic = topic; break; }
+            }
+          } else {
+            sample -= topicBetaMass;
+            sample /= beta;
+            newTopic = 0;
+            sample -= alpha[newTopic] / (tpt[newTopic] + betaSum);
+            while (sample > 0.0) { newTopic++; sample -= alpha[newTopic] / (tpt[newTopic] + betaSum); }
+          }
+        }
+        topics[position] = newTopic;
+        topicBetaMass -= beta * local[newTopic] / (tpt[newTopic] + betaSum);
+        local[newTopic]++;
+        if (local[newTopic] === 1) {
+          denseIndex = nonZeroTopics;
+          while (denseIndex > 0 && localIndex[denseIndex - 1] > newTopic) { localIndex[denseIndex] = localIndex[denseIndex - 1]; denseIndex--; }
+          localIndex[denseIndex] = newTopic;
+          nonZeroTopics++;
+        }
+        cc[newTopic] = (alpha[newTopic] + local[newTopic]) / (tpt[newTopic] + betaSum);
+        topicBetaMass += beta * local[newTopic] / (tpt[newTopic] + betaSum);
+      }
+      if (iteration > burnIn && (iteration - burnIn) % thinning === 0) {
+        for (topic = 0; topic < K; topic++) { result[topic] += alpha[topic] + local[topic]; sum += alpha[topic] + local[topic]; }
+      }
+    }
+    for (denseIndex = 0; denseIndex < nonZeroTopics; denseIndex++) { topic = localIndex[denseIndex]; cc[topic] = alpha[topic] / (tpt[topic] + betaSum); }
+    if (sum === 0.0) for (topic = 0; topic < K; topic++) { result[topic] = alpha[topic] + local[topic]; sum += result[topic]; }
+    for (topic = 0; topic < K; topic++) result[topic] /= sum;
+    return result;
+  };
+  // docs: [{ name, text }] or [text], imported as the model's were and read with its words only; or a
+  // corpus from importDocs. o: iterations (100), thinning (MALLET's --sample-interval, 10), burnin (10).
+  // { docs: [{ name, meta, length, known }], theta: [[p]] }
+  Inferencer.prototype.infer = function (docs, o) {
+    o = o || {};
+    var corpus = docs && docs.docs ? docs : M.importDocs(docs, Object.assign({}, this.importOptions, { alphabet: this.alphabet.fixed() }));
+    var self = this, it = o.iterations != null ? o.iterations : 100, th = o.thinning != null ? o.thinning : 10, bi = o.burnin != null ? o.burnin : 10;
+    return {
+      docs: corpus.docs.map(function (d) { var k = 0; for (var p = 0; p < d.tokens.length; p++) if (d.tokens[p] >= 0) k++; return { name: d.name, meta: d.meta, length: d.tokens.length, known: k }; }),
+      theta: corpus.docs.map(function (d) { return Array.from(self.sampledDistribution(d.tokens, it, th, bi)); })
+    };
+  };
+  // infer-topics' --output-doc-topics (dense, as with --doc-topics-threshold 0)
+  Inferencer.prototype.docTopics = function (r) {
+    return '#doc name topic proportion ...\n' + r.theta.map(function (row, i) { return i + '\t' + (r.docs[i].name != null ? r.docs[i].name : 'no-name') + row.map(function (x) { return '\t' + javaDouble(x); }).join('') + '\n'; }).join('');
+  };
+  TopicModel.prototype.inferencer = function (seed) { return new Inferencer(this, seed); };
+  M.Inferencer = Inferencer;
+
+
+  // ---------- a trained model as data, and the inferencer from it ----------
+  // What inference needs, as plain values (for a model file, or to cross from a Worker):
+  // { kind: 'mallette-model', version, numTopics, alpha, alphaSum, beta, betaSum, words,
+  //   typeTopicCounts (packed, as MALLET holds them), tokensPerTopic, importOptions }
+  TopicModel.prototype.toJSON = function () {
+    var io = this.importOptions || {};
+    return {
+      kind: 'mallette-model', version: M.VERSION, numTopics: this.numTopics,
+      alpha: Array.from(this.alpha), alphaSum: this.alphaSum, beta: this.beta, betaSum: this.betaSum,
+      words: this.alphabet.words.slice(), typeTopicCounts: this.typeTopicCounts.map(function (a) { return Array.from(a); }),
+      tokensPerTopic: Array.from(this.tokensPerTopic),
+      importOptions: { stopwords: io.stopwords, extraStopwords: io.extraStopwords, preserveCase: io.preserveCase, token: io.token ? { source: io.token.source, flags: io.token.flags } : undefined }
+    };
+  };
+  // an inferencer from a model's data (toJSON's)
+  M.inferencerFrom = function (m, seed) {
+    var alphabet = new Alphabet(); m.words.forEach(function (w) { alphabet.lookup(w); });
+    var io = Object.assign({}, m.importOptions || {}); if (io.token && io.token.source) io.token = new RegExp(io.token.source, io.token.flags);
+    var shell = { numTopics: m.numTopics, alpha: m.alpha, beta: m.beta, betaSum: m.betaSum, alphabet: alphabet, importOptions: io,
+      typeTopicCounts: m.typeTopicCounts, tokensPerTopic: m.tokensPerTopic };
+    var mask, bits, K = m.numTopics;
+    if (popcount(K) === 1) { mask = K - 1; bits = popcount(mask); } else { mask = highestOneBit(K) * 2 - 1; bits = popcount(mask); }
+    shell.topicMask = mask; shell.topicBits = bits;
+    return new Inferencer(shell, seed);
+  };
+
+  // ---------- in a Web Worker ----------
+  // M.trainInWorker(docs, numTopics, o): the model estimated in a Worker (mallette-worker.js, beside
+  // this file, or o.workerURL), so that a long run leaves the page free. o as train()'s, and
+  // numWords (20), progress(iteration, of), diagnostics (true: the diagnostics too). Returns
+  // { promise, cancel }: the promise gives { result, model (toJSON's), topicKeys, diagnostics }.
+  var HERE = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : null;
+  M.trainInWorker = function (docs, numTopics, o) {
+    o = o || {};
+    var url = o.workerURL || (HERE ? HERE.replace(/mallette(\.min)?\.js(\?.*)?$/, 'mallette-worker.js') : 'mallette-worker.js');
+    var w = new Worker(url), done = false, opts = {};
+    for (var k in o) if (typeof o[k] !== 'function' && k !== 'workerURL') opts[k] = o[k];
+    if (opts.token) opts.token = { source: opts.token.source, flags: opts.token.flags };
+    var promise = new Promise(function (res, rej) {
+      w.onmessage = function (e) {
+        var m = e.data;
+        if (m.type === 'progress') { if (o.progress) o.progress(m.iteration, m.of); }
+        else if (m.type === 'done') { done = true; w.terminate(); res(m); }
+        else if (m.type === 'error') { done = true; w.terminate(); rej(new Error(m.message)); }
+      };
+      w.onerror = function (e) { if (!done) { done = true; w.terminate(); rej(new Error(e.message || 'the worker failed')); } };
+    });
+    w.postMessage({ type: 'train', docs: docs, numTopics: numTopics, o: opts });
+    return { promise: promise, cancel: function () { if (!done) { done = true; w.terminate(); } } };
   };
 
   M.TopicModel = TopicModel;

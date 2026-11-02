@@ -1,10 +1,11 @@
 {
   "name": "mallette",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MALLET's topic model (LDA with hyperparameter optimisation) in the browser and in node, giving the same assignments as MALLET 2.1.1",
   "main": "src/mallette.js",
   "license": "Apache-2.0",
   "author": "David M. Berry",
   "keywords": ["topic-model", "lda", "mallet", "digital-humanities", "browser"],
-  "scripts": { "compare": "node test/compare.js test/corpora/mallet-web-en.txt --topics 5 --iterations 400 --seed 7 --optimize 20" }
+  "files": ["src/", "LICENSE", "NOTICE", "README.md"],
+  "scripts": { "test": "node test/run.js", "compare": "node test/compare.js test/corpora/mallet-web-en.txt --topics 5 --iterations 400 --seed 7 --optimize 20" }
 }

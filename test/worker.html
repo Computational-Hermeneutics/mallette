@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mallette in a Worker</title>
+<!-- test/worker.html: mallette.trainInWorker() against the same model estimated in the page. Serve
+     the repository (python3 -m http.server) and open /test/worker.html; window.__result holds the outcome. -->
+<body style="font: 14px system-ui; padding: 16px">
+<p id="out">Running…</p>
+<script src="../src/mallette.js"></script>
+<script>
+(async function () {
+  var out = document.getElementById('out'), r = {};
+  try {
+    var text = await (await fetch('corpora/mallet-web-en.txt')).text();
+    var docs = text.split('\n').filter(Boolean).map(function (l) { var m = /^(\S*)[\s,]*(\S*)[\s,]*(.*)$/.exec(l); return { name: m[1], text: m[3] }; });
+    var o = { seed: 7, iterations: 400, optimizeInterval: 20, diagnostics: true }, steps = 0;
+    var job = mallette.trainInWorker(docs, 5, Object.assign({ progress: function () { steps++; } }, o));
+    var w = await job.promise;
+    var here = mallette.train(docs, 5, o);
+    r.sameKeys = w.topicKeys === here.topicKeys(20);
+    r.sameDiagnostics = JSON.stringify(w.diagnostics) === JSON.stringify(here.diagnostics(20));
+    var inf = mallette.inferencerFrom(w.model, 7), mine = here.inferencer(7);
+    r.sameInference = inf.docTopics(inf.infer(docs)) === mine.docTopics(mine.infer(docs));
+    r.progressReports = steps;
+    var c = mallette.trainInWorker(docs, 20, { seed: 1, iterations: 100000 }); c.cancel();
+    r.cancelled = await Promise.race([c.promise.then(function () { return false; }, function () { return false; }), new Promise(function (res) { setTimeout(function () { res(true); }, 500); })]);
+    r.ok = r.sameKeys && r.sameDiagnostics && r.sameInference && r.progressReports > 0 && r.cancelled;
+  } catch (e) { r.error = String(e.message || e); r.ok = false; }
+  window.__result = r;
+  out.textContent = (r.ok ? 'All agree. ' : 'Failed. ') + JSON.stringify(r);
+})();
+</script>

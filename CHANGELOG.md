@@ -1,5 +1,12 @@
 # Changelog: mallette
 
+## 0.2.1 (2 November 2026)
+
+- **Java's logarithm.** mallette carries fdlibm's `log`, which Java's `StrictMath.log` is and its `Math.log` gives (checked on 800 values with Java 27 on arm64), in place of JavaScript's `Math.log`. JavaScript's differs from it in the last bit for about one value in two thousand, and from one engine to another (node 22 and Chrome 152 differ), so a model trained in a browser and the same model trained in node could part on a long run, and either could part from MALLET. The tests made with 0.2.0 matched MALLET because none of them met such a value; with 0.2.1 the same model comes out of every engine, as MALLET's. `mallette.log` is the function.
+- The Worker takes the diagnostics over MALLET's 20 top words (`diagnosticsWords`), however many words of each topic it sends back (`numWords`): coherence and exclusivity depend on the number.
+- `highestOneBit` without `Math.log2`.
+- `npm test`: 25 checks (Java's log on values where engines differ).
+
 ## 0.2.0 (2 November 2026)
 
 - **Diagnostics**, as MALLET's `--diagnostics-file` (`TopicModelDiagnostics`): `model.diagnostics(n)` gives, for each topic, its tokens, document entropy, word length, coherence, distance from uniform and from the corpus, effective number of words, token–document difference, rank-1 documents, allocation ratio and count, and exclusivity, and for each of its top words the measures defined word by word; `model.diagnosticsXML(n)` writes MALLET's file. The same file, byte for byte, on every corpus and setting checked.

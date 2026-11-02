@@ -34,6 +34,10 @@ same('the diagnostics', model.diagnosticsXML(20), ex('web-en-k5-s7-diagnostics.x
 const inf = model.inferencer(7);
 same('the topics inferred', inf.docTopics(inf.infer(docs)), ex('web-en-k5-s7-inferred.txt'));
 
+// Java's Math.log (fdlibm): values where JavaScript's own Math.log may differ, with Java's answers
+const jl = ex('java-log.txt').trim().split('\n').map((l) => l.split(' ').map(Number));
+eq('Java\'s Math.log, on ' + jl.length + ' values where engines differ', jl.every(([x, y]) => M.log(x) === y), true);
+eq('log of 0, a negative number, infinity and 1', [M.log(0), M.log(-1), M.log(Infinity), M.log(1)].map(String), ['-Infinity', 'NaN', 'Infinity', '0']);
 // Java's %.nf
 eq('%.4f, half up on the shortest digits', [M.javaFixed(0.00005, 4), M.javaFixed(1.00005, 4), M.javaFixed(2.5, 0), M.javaFixed(-0.00004, 4)], ['0.0001', '1.0001', '3', '-0.0000']);
 eq('%.4f of NaN and infinity', [M.javaFixed(NaN, 4), M.javaFixed(Infinity, 4), M.javaFixed(-Infinity, 4)], ['NaN', 'Infinity', '-Infinity']);

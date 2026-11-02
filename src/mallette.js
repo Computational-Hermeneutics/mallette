@@ -21,7 +21,7 @@
   else root.mallette = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  var M = { VERSION: '0.2.0' };
+  var M = { VERSION: '0.2.1' };
   // MALLET's built-in English stoplist, as TokenSequenceRemoveStopwords holds it (524 entries; its commented-out
   // words for paper abstracts left out, as Java leaves them)
   var STOPLIST_EN = ['a','able','about','above','according','accordingly','across','actually','after','afterwards','again','against','all','allow','allows','almost','alone','along','already','also','although','always','am','among','amongst','an','and','another','any','anybody','anyhow','anyone','anything','anyway','anyways','anywhere','apart','appear','appreciate','appropriate','are','around','as','aside','ask','asking','associated','at','available','away','awfully','b','be','became','because','become','becomes','becoming','been','before','beforehand','behind','being','believe','below','beside','besides','best','better','between','beyond','both','brief','but','by','c','came','can','cannot','cant','cause','causes','certain','certainly','changes','clearly','co','com','come','comes','concerning','consequently','consider','considering','contain','containing','contains','corresponding','could','course','currently','d','definitely','described','despite','did','different','do','does','doing','done','down','downwards','during','e','each','edu','eg','eight','either','else','elsewhere','enough','entirely','especially','et','etc','even','ever','every','everybody','everyone','everything','everywhere','ex','exactly','example','except','f','far','few','fifth','first','five','followed','following','follows','for','former','formerly','forth','four','from','further','furthermore','g','get','gets','getting','given','gives','go','goes','going','gone','got','gotten','greetings','h','had','happens','hardly','has','have','having','he','hello','help','hence','her','here','hereafter','hereby','herein','hereupon','hers','herself','hi','him','himself','his','hither','hopefully','how','howbeit','however','i','ie','if','ignored','immediate','in','inasmuch','inc','indeed','indicate','indicated','indicates','inner','insofar','instead','into','inward','is','it','its','itself','j','just','k','keep','keeps','kept','know','knows','known','l','last','lately','later','latter','latterly','least','less','lest','let','like','liked','likely','little','look','looking','looks','ltd','m','mainly','many','may','maybe','me','mean','meanwhile','merely','might','more','moreover','most','mostly','much','must','my','myself','n','name','namely','nd','near','nearly','necessary','need','needs','neither','never','nevertheless','new','next','nine','no','nobody','non','none','noone','nor','normally','not','nothing','novel','now','nowhere','o','obviously','of','off','often','oh','ok','okay','old','on','once','one','ones','only','onto','or','other','others','otherwise','ought','our','ours','ourselves','out','outside','over','overall','own','p','particular','particularly','per','perhaps','placed','please','plus','possible','presumably','probably','provides','q','que','quite','qv','r','rather','rd','re','really','reasonably','regarding','regardless','regards','relatively','respectively','right','s','said','same','saw','say','saying','says','second','secondly','see','seeing','seem','seemed','seeming','seems','seen','self','selves','sensible','sent','serious','seriously','seven','several','shall','she','should','since','six','so','some','somebody','somehow','someone','something','sometime','sometimes','somewhat','somewhere','soon','sorry','specified','specify','specifying','still','sub','such','sup','sure','t','take','taken','tell','tends','th','than','thank','thanks','thanx','that','thats','the','their','theirs','them','themselves','then','thence','there','thereafter','thereby','therefore','therein','theres','thereupon','these','they','think','third','this','thorough','thoroughly','those','though','three','through','throughout','thru','thus','to','together','too','took','toward','towards','tried','tries','truly','try','trying','twice','two','u','un','under','unfortunately','unless','unlikely','until','unto','up','upon','us','use','used','useful','uses','using','usually','uucp','v','value','various','very','via','viz','vs','w','want','wants','was','way','we','welcome','well','went','were','what','whatever','when','whence','whenever','where','whereafter','whereas','whereby','wherein','whereupon','wherever','whether','which','while','whither','who','whoever','whole','whom','whose','why','will','willing','wish','with','within','without','wonder','would','would','x','y','yes','yet','you','your','yours','yourself','yourselves','z','zero'];
@@ -53,6 +53,57 @@
   // Randoms.nextUniform(): ((long) next(26) << 27) + next(27), over 2^53
   JavaRandom.prototype.nextUniform = function () { return (this.next(26) * 134217728 + this.next(27)) / 9007199254740992; };
   M.JavaRandom = JavaRandom;
+
+  // ---------- Java's Math.log ----------
+  // fdlibm's __ieee754_log (e_log.c), which Java's StrictMath.log is and its Math.log gives: JavaScript's
+  // Math.log differs from it in the last bit for about one value in two thousand, and from one engine
+  // (node, a browser) to another, so mallette carries its own to give MALLET's numbers everywhere.
+  var buf = new ArrayBuffer(8), f64 = new Float64Array(buf), u32 = new Uint32Array(buf);
+  var LITTLE = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1, HI = LITTLE ? 1 : 0, LO = LITTLE ? 0 : 1;
+  var ln2_hi = 6.93147180369123816490e-01, ln2_lo = 1.90821492927058770002e-10, two54 = 1.80143985094819840000e+16,
+    Lg1 = 6.666666666666735130e-01, Lg2 = 3.999999999940941908e-01, Lg3 = 2.857142874366239149e-01, Lg4 = 2.222219843214978396e-01,
+    Lg5 = 1.818357216161805012e-01, Lg6 = 1.531383769920937332e-01, Lg7 = 1.479819860511658591e-01;
+  function jlog(x) {
+    var hfsq, f, s, z, R, w, t1, t2, dk, k = 0, hx, i, j, lx;
+    f64[0] = x; hx = u32[HI] | 0; lx = u32[LO] >>> 0;
+    if (hx < 0x00100000) {                       // x < 2**-1022
+      if (((hx & 0x7fffffff) | lx) === 0) return -Infinity;
+      if (hx < 0) return NaN;
+      k -= 54; x *= two54;
+      f64[0] = x; hx = u32[HI] | 0;
+    }
+    if (hx >= 0x7ff00000) return x + x;
+    k += (hx >> 20) - 1023;
+    hx &= 0x000fffff;
+    i = (hx + 0x95f64) & 0x100000;
+    f64[0] = x; u32[HI] = hx | (i ^ 0x3ff00000); x = f64[0];   // normalize x or x/2
+    k += (i >> 20);
+    f = x - 1.0;
+    if ((0x000fffff & (2 + hx)) < 3) {           // |f| < 2**-20
+      if (f === 0) { if (k === 0) return 0; dk = k; return dk * ln2_hi + dk * ln2_lo; }
+      R = f * f * (0.5 - 0.33333333333333333 * f);
+      if (k === 0) return f - R;
+      dk = k; return dk * ln2_hi - ((R - dk * ln2_lo) - f);
+    }
+    s = f / (2.0 + f);
+    dk = k;
+    z = s * s;
+    i = hx - 0x6147a;
+    w = z * z;
+    j = 0x6b851 - hx;
+    t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
+    t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
+    i |= j;
+    R = t2 + t1;
+    if (i > 0) {
+      hfsq = 0.5 * f * f;
+      if (k === 0) return f - (hfsq - s * (hfsq + R));
+      return dk * ln2_hi - ((hfsq - (s * (hfsq + R) + dk * ln2_lo)) - f);
+    }
+    if (k === 0) return f - s * (f - R);
+    return dk * ln2_hi - ((s * (f - R) - dk * ln2_lo) - f);
+  }
+  M.log = jlog;
 
   // ---------- documents into token sequences, as `mallet import-file --keep-sequence` ----------
   // MALLET's built-in English stoplist (TokenSequenceRemoveStopwords), used by --remove-stopwords
@@ -90,7 +141,7 @@
   };
 
   // ---------- cc.mallet.types.Dirichlet, the parts LDA uses ----------
-  var EULER_MASCHERONI = -0.5772156649015328606065121, HALF_LOG_TWO_PI = Math.log(2 * Math.PI) / 2;
+  var EULER_MASCHERONI = -0.5772156649015328606065121, HALF_LOG_TWO_PI = jlog(2 * Math.PI) / 2;
   var DIGAMMA_SMALL = 0.000001, DIGAMMA_LARGE = 9.5;
   // MALLET's digamma. Its series coefficients are written 1/12, 1/120 … in Java's integer arithmetic,
   // so each is 0, and the series reduces to log(z) - 1/(2z); kept so, to make the same numbers.
@@ -99,14 +150,14 @@
     if (z < DIGAMMA_SMALL) return EULER_MASCHERONI - (1 / z);
     while (z < DIGAMMA_LARGE) { psi -= 1 / z; z++; }
     var invZ = 1 / z;
-    psi += Math.log(z) - 0.5 * invZ;
+    psi += jlog(z) - 0.5 * invZ;
     return psi;
   }
   function logGammaStirling(z) {
     var shift = 0;
     while (z < 2) { z++; shift++; }
-    var result = HALF_LOG_TWO_PI + (z - 0.5) * Math.log(z) - z + 1 / (12 * z) - 1 / (360 * z * z * z) + 1 / (1260 * z * z * z * z * z);
-    while (shift > 0) { shift--; z--; result -= Math.log(z); }
+    var result = HALF_LOG_TWO_PI + (z - 0.5) * jlog(z) - z + 1 / (12 * z) - 1 / (360 * z * z * z) + 1 / (1260 * z * z * z * z * z);
+    while (shift > 0) { shift--; z--; result -= jlog(z); }
     return result;
   }
   function learnSymmetricConcentration(countHistogram, observationLengths, numDimensions, currentValue) {
@@ -200,7 +251,7 @@
     if (this.saveSampleInterval > this.optimizeInterval) this.saveSampleInterval = this.optimizeInterval;
   };
   function popcount(n) { var c = 0; while (n) { c += n & 1; n >>>= 1; } return c; }
-  function highestOneBit(n) { return n ? Math.pow(2, Math.floor(Math.log2(n))) : 0; }
+  function highestOneBit(n) { if (!n) return 0; var h = 1; while (n > 1) { n >>>= 1; h *= 2; } return h; }
 
   // corpus: from importDocs
   TopicModel.prototype.addInstances = function (corpus) {
@@ -619,7 +670,7 @@
           if (topicCounts[topic2] > 0) {
             nonZero[topic2]++;
             if (topicCounts[topic2] > maxCount) { maxTopic = topic2; maxCount = topicCounts[topic2]; }
-            sumCLC[topic2] += topicCounts[topic2] * Math.log(topicCounts[topic2]);
+            sumCLC[topic2] += topicCounts[topic2] * jlog(topicCounts[topic2]);
             var proportion = (self.alpha[topic2] + topicCounts[topic2]) / (self.alphaSum + docLength);
             for (var q = 0; q < DOC_PROPORTIONS.length; q++) { if (proportion < DOC_PROPORTIONS[q]) break; atProps[topic2][q]++; }
             var supported = docSets[topic2], ix = inOrder[topic2], M2 = co[topic2];
@@ -641,7 +692,7 @@
     function S(name) { var w = []; for (var x = 0; x < K; x++) w.push(new Float64Array(N)); return { name: name, scores: new Float64Array(K), words: w, wordScores: false }; }
     var list = [];
     var tok = S('tokens'); for (t = 0; t < K; t++) tok.scores[t] = tpt[t]; list.push(tok);
-    var ent = S('document_entropy'); for (t = 0; t < K; t++) ent.scores[t] = -sumCLC[t] / tpt[t] + Math.log(tpt[t]); list.push(ent);
+    var ent = S('document_entropy'); for (t = 0; t < K; t++) ent.scores[t] = -sumCLC[t] / tpt[t] + jlog(tpt[t]); list.push(ent);
     var wl = S('word-length'); wl.wordScores = true;
     for (t = 0; t < K; t++) { var total = 0; for (i = 0; i < N; i++) { if (topWords[t][i] == null) break; total += topWords[t][i].length; wl.words[t][i] = topWords[t][i].length; } wl.scores[t] = total / N; }
     list.push(wl);
@@ -650,17 +701,17 @@
       var mx = co[t], ts = 0;
       for (var row = 0; row < N; row++) {
         var rs = 0, mn = 0;
-        for (var col = 0; col < row; col++) { var sc = Math.log((mx[row * N + col] + self.beta) / (mx[col * N + col] + self.beta)); rs += sc; if (sc < mn) mn = sc; }
+        for (var col = 0; col < row; col++) { var sc = jlog((mx[row * N + col] + self.beta) / (mx[col * N + col] + self.beta)); rs += sc; if (sc < mn) mn = sc; }
         ts += rs; coh.words[t][row] = mn;
       }
       coh.scores[t] = ts;
     }
     list.push(coh);
     var uni = S('uniform_dist'); uni.wordScores = true;
-    for (t = 0; t < K; t++) { var u = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc2 = (c / tpt[t]) * Math.log((c * numTypes) / tpt[t]); if (pos < N) uni.words[t][pos] = sc2; u += sc2; }); uni.scores[t] = u; }
+    for (t = 0; t < K; t++) { var u = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc2 = (c / tpt[t]) * jlog((c * numTypes) / tpt[t]); if (pos < N) uni.words[t][pos] = sc2; u += sc2; }); uni.scores[t] = u; }
     list.push(uni);
     var cor = S('corpus_dist'); cor.wordScores = true;
-    for (t = 0; t < K; t++) { var coef = numTokens / tpt[t], cs = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc3 = (c / tpt[t]) * Math.log(coef * c / wordTypeCounts[x[0]]); if (pos < N) cor.words[t][pos] = sc3; cs += sc3; }); cor.scores[t] = cs; }
+    for (t = 0; t < K; t++) { var coef = numTokens / tpt[t], cs = 0; sw[t].forEach(function (x, pos) { var c = x[1], sc3 = (c / tpt[t]) * jlog(coef * c / wordTypeCounts[x[0]]); if (pos < N) cor.words[t][pos] = sc3; cs += sc3; }); cor.scores[t] = cs; }
     list.push(cor);
     var eff = S('eff_num_words');
     for (t = 0; t < K; t++) { var ss = 0; sw[t].forEach(function (x) { var pr = x[1] / tpt[t]; ss += pr * pr; }); eff.scores[t] = 1.0 / ss; }
@@ -671,8 +722,8 @@
       while (pos2 < sw[t].length && pos2 < N) { wd[pos2] = sw[t][pos2][1]; dd[pos2] = co[t][pos2 * N + pos2]; wsum += wd[pos2]; dsum += dd[pos2]; pos2++; }
       for (pos2 = 0; pos2 < N; pos2++) {
         var pp = wd[pos2] / wsum, qq = dd[pos2] / dsum, mean = 0.5 * (pp + qq), sc4 = 0.0;
-        if (pp > 0) sc4 += 0.5 * pp * Math.log(pp / mean);
-        if (qq > 0) sc4 += 0.5 * qq * Math.log(qq / mean);
+        if (pp > 0) sc4 += 0.5 * pp * jlog(pp / mean);
+        if (qq > 0) sc4 += 0.5 * qq * jlog(qq / mean);
         tdd.words[t][pos2] = sc4; tsc += sc4;
       }
       tdd.scores[t] = tsc;
@@ -880,7 +931,8 @@
   // ---------- in a Web Worker ----------
   // M.trainInWorker(docs, numTopics, o): the model estimated in a Worker (mallette-worker.js, beside
   // this file, or o.workerURL), so that a long run leaves the page free. o as train()'s, and
-  // numWords (20), progress(iteration, of), diagnostics (true: the diagnostics too). Returns
+  // numWords (20), progress(iteration, of), diagnostics (true: the diagnostics too, over
+  // diagnosticsWords top words, 20 as MALLET's --num-top-words). Returns
   // { promise, cancel }: the promise gives { result, model (toJSON's), topicKeys, diagnostics }.
   var HERE = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : null;
   M.trainInWorker = function (docs, numTopics, o) {

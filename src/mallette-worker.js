@@ -21,7 +21,7 @@ self.onmessage = function (e) {
       if (now - last > 100 || model.iteration === of) { last = now; self.postMessage({ type: 'progress', iteration: model.iteration, of: of }); }
     }
     var n = o.numWords || 20;
-    self.postMessage({ type: 'done', result: model.result(n), model: model.toJSON(), topicKeys: model.topicKeys(n), diagnostics: o.diagnostics ? model.diagnostics(n) : null });
+    self.postMessage({ type: 'done', result: model.result(n), model: model.toJSON(), topicKeys: model.topicKeys(n), diagnostics: o.diagnostics ? model.diagnostics(o.diagnosticsWords || 20) : null });
   } catch (err) {
     self.postMessage({ type: 'error', message: String(err && err.message || err) });
   }

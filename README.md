@@ -1,7 +1,7 @@
 # mallette
 
 **Author:** David M. Berry  
-**Version:** 0.2.0  
+**Version:** 0.2.1  
 **Date:** 2 November 2026  
 **Licence:** Apache License 2.0 (see `LICENSE` and `NOTICE`)
 
@@ -74,7 +74,7 @@ job.promise.then(({ result, model, topicKeys, diagnostics }) => { /* model is to
 // job.cancel() stops it
 ```
 
-It loads `mallette-worker.js` from beside `mallette.js` (or `workerURL`).
+It loads `mallette-worker.js` from beside `mallette.js` (or `workerURL`). `numWords` sets how many words of each topic come back, and `diagnosticsWords` how many top words the diagnostics are taken over (20, as MALLET's `--num-top-words`), since coherence and exclusivity depend on it.
 
 ## Porting decisions
 
@@ -84,6 +84,7 @@ It loads `mallette-worker.js` from beside `mallette.js` (or `workerURL`).
 - **MALLET's arithmetic, including its quirks.** The series coefficients in MALLET's `digamma` are written `1/12`, `1/120` and so on, which Java evaluates as integer division, so each is zero and the function reduces to `log(z) - 1/(2z)` after its recurrence. mallette keeps this, since the hyperparameters, and every later assignment, depend on it. The flag that starts collecting statistics for hyperparameter optimisation is never turned off once set, as in MALLET.
 - **The import.** MALLET's default token pattern, its lower-casing, and its built-in English stoplist (the 524 words of `TokenSequenceRemoveStopwords`, without the words for paper abstracts that are commented out in its source) are reproduced. Words enter the alphabet in the order first met. Documents are given as text rather than read from files; `test/compare.js` applies MALLET's line pattern (name, label, text) when it reads MALLET's input files.
 - **Diagnostics and inference as MALLET has them.** `TopicModelDiagnostics` and `TopicInferencer` are translated line for line, quirks included: the diagnostics file escapes `<` as `&gt;`; a top word missing from a short topic is counted as word 0 in the co-document counts, as Java's default 0; inference starts each token at its word's most frequent topic and passes over words the model does not hold. Java's `%.4f` (the shortest decimal digits, rounded half up) is imitated, so the file matches byte for byte.
+- **Java's logarithm.** Every logarithm is fdlibm's (`mallette.log`), as Java's `Math.log` gives it, since JavaScript's `Math.log` differs from Java's in the last bit for a few values and from one JavaScript engine to another. The same model comes out of node and every browser.
 - **Steps that yield.** In a browser a long run must not stop the page. `estimateAsync` runs as many iterations as fit in about 40 milliseconds, then lets the page go on, reports progress and can be cancelled. The sequence of random numbers is the same as a run straight through.
 - **Output formats.** Java's `NumberFormat` (at most five decimal places, grouping commas) for the topic keys and Java's `Double.toString` for the state file and the document–topic table are imitated, so the files can be read by tools that read MALLET's.
 - **Left out.** Everything in MALLET that is not this topic model: classifiers, sequence models, other topic models (hierarchical LDA, PAM, the polylingual model), the command line and the binary formats. These are in MALLET, and mallette does not try to replace it.
